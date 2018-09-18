@@ -1,6 +1,6 @@
 
 /*! @file
- *  This is an example of the PIN tool that demonstrates some basic PIN APIs 
+ *  This is an example of the PIN tool that demonstrates some basic PIN APIs
  *  and could serve as the starting point for developing your first PIN tool
  */
 
@@ -9,7 +9,7 @@
 #include <fstream>
 
 /* ================================================================== */
-// Global variables 
+// Global variables
 /* ================================================================== */
 
 UINT64 insCount = 0;        //number of dynamically executed instructions
@@ -17,6 +17,11 @@ UINT64 bblCount = 0;        //number of dynamically executed basic blocks
 UINT64 threadCount = 0;     //total number of threads, including main thread
 
 std::ostream * out = &cerr;
+
+ADDRINT g_addrLow;
+ADDRINT g_addrHigh;
+BOOL g_bMainExecLoaded = FALSE;
+
 
 /* ===================================================================== */
 // Command line switches
@@ -66,7 +71,7 @@ VOID CountBbl(UINT32 numInstInBbl)
 /* ===================================================================== */
 
 /*!
- * Insert call to the CountBbl() analysis routine before every basic block 
+ * Insert call to the CountBbl() analysis routine before every basic block
  * of the trace.
  * This function is called every time a new trace is encountered.
  * @param[in]   trace    trace to be instrumented
@@ -75,11 +80,13 @@ VOID CountBbl(UINT32 numInstInBbl)
  */
 VOID Trace(TRACE trace, VOID *v)
 {
-    // Visit every basic block in the trace
-    for (BBL bbl = TRACE_BblHead(trace); BBL_Valid(bbl); bbl = BBL_Next(bbl))
-    {
-        // Insert a call to CountBbl() before every basic bloc, passing the number of instructions
-        BBL_InsertCall(bbl, IPOINT_BEFORE, (AFUNPTR)CountBbl, IARG_UINT32, BBL_NumIns(bbl), IARG_END);
+    if( g_bMainExecLoaded ) {
+        // Visit every basic block in the trace
+        for (BBL bbl = TRACE_BblHead(trace); BBL_Valid(bbl); bbl = BBL_Next(bbl))
+        {
+            // Insert a call to CountBbl() before every basic bloc, passing the number of instructions
+            BBL_InsertCall(bbl, IPOINT_BEFORE, (AFUNPTR)CountBbl, IARG_UINT32, BBL_NumIns(bbl), IARG_END);
+        }
     }
 }
 
@@ -90,7 +97,7 @@ VOID Trace(TRACE trace, VOID *v)
  * @param[in]   threadIndex     ID assigned by PIN to the new thread
  * @param[in]   ctxt            initial register state for the new thread
  * @param[in]   flags           thread creation flags (OS specific)
- * @param[in]   v               value specified by the tool in the 
+ * @param[in]   v               value specified by the tool in the
  *                              PIN_AddThreadStartFunction function call
  */
 VOID ThreadStart(THREADID threadIndex, CONTEXT *ctxt, INT32 flags, VOID *v)
@@ -98,11 +105,38 @@ VOID ThreadStart(THREADID threadIndex, CONTEXT *ctxt, INT32 flags, VOID *v)
     threadCount++;
 }
 
+VOID Instruction(INS ins, VOID *v)
+{
+    //https://software.intel.com/sites/landingpage/pintool/docs/97619/Pin/html/group__INS__BASIC__API__GEN__IA32.html
+    // compare [1] and [2]. [1] is a lot less.
+    string strInst = INS_Mnemonic(ins);
+    ADDRINT addr = INS_Address(ins);
+    if( g_bMainExecLoaded ) { // if the main module is not loaded, we don’t need to trace any.
+        if( g_addrLow <= addr && addr <= g_addrHigh ) {
+            printf("[1] %llx %s\n", addr, strInst.c_str());
+        }
+    } else {
+        printf("[2] %llx %s\n", addr, strInst.c_str());
+    }
+}
+
+VOID ImageLoad(IMG img, VOID *v)
+{
+    if( IMG_IsMainExecutable(img) ) {
+        //printf("%p - %p\n", (void*)IMG_LowAddress(img), (void*)IMG_HighAddress(img));
+        g_addrLow = IMG_LowAddress(img);
+        g_addrHigh = IMG_HighAddress(img);
+
+        // Use the above addresses to prune out non-interesting instructions.
+        g_bMainExecLoaded = TRUE;
+    }
+}
+
 /*!
  * Print out analysis results.
  * This function is called when the application exits.
  * @param[in]   code            exit code of the application
- * @param[in]   v               value specified by the tool in the 
+ * @param[in]   v               value specified by the tool in the
  *                              PIN_AddFiniFunction function call
  */
 VOID Fini(INT32 code, VOID *v)
@@ -119,24 +153,33 @@ VOID Fini(INT32 code, VOID *v)
  * The main procedure of the tool.
  * This function is called when the application image is loaded but not yet started.
  * @param[in]   argc            total number of elements in the argv array
- * @param[in]   argv            array of command line arguments, 
+ * @param[in]   argv            array of command line arguments,
  *                              including pin -t <toolname> -- ...
  */
 int main(int argc, char *argv[])
 {
     // Initialize PIN library. Print help message if -h(elp) is specified
-    // in the command line or the command line is invalid 
+    // in the command line or the command line is invalid
     if( PIN_Init(argc,argv) )
     {
         return Usage();
     }
-    
+
     string fileName = KnobOutputFile.Value();
 
     if (!fileName.empty()) { out = new std::ofstream(fileName.c_str());}
 
     if (KnobCount)
     {
+        // On OS X*, you must initially do PIN_InitSymbols() if you want to use IMG_AddInstrumentFunction()
+        PIN_InitSymbols();
+
+        // Register ImageLoad to be called when an image is loaded
+        IMG_AddInstrumentFunction(ImageLoad, 0);
+
+        // Register Instruction to be called to instrument instructions
+        INS_AddInstrumentFunction(Instruction, 0);
+
         // Register function to be called to instrument traces
         TRACE_AddInstrumentFunction(Trace, 0);
 
@@ -146,10 +189,10 @@ int main(int argc, char *argv[])
         // Register function to be called when the application exits
         PIN_AddFiniFunction(Fini, 0);
     }
-    
+
     cerr <<  "===============================================" << endl;
     cerr <<  "This application is instrumented by MyPinTool" << endl;
-    if (!KnobOutputFile.Value().empty()) 
+    if (!KnobOutputFile.Value().empty())
     {
         cerr << "See file " << KnobOutputFile.Value() << " for analysis results" << endl;
     }
@@ -157,7 +200,7 @@ int main(int argc, char *argv[])
 
     // Start the program, never returns
     PIN_StartProgram();
-    
+
     return 0;
 }
 
