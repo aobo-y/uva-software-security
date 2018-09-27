@@ -50,46 +50,6 @@ INT32 Usage()
     return -1;
 }
 
-/* ===================================================================== */
-// Analysis routines
-/* ===================================================================== */
-
-/*!
- * Increase counter of the executed basic blocks and instructions.
- * This function is called for every basic block when it is about to be executed.
- * @param[in]   numInstInBbl    number of instructions in the basic block
- * @note use atomic operations for multi-threaded applications
- */
-VOID CountBbl(UINT32 numInstInBbl)
-{
-    bblCount++;
-    insCount += numInstInBbl;
-}
-
-/* ===================================================================== */
-// Instrumentation callbacks
-/* ===================================================================== */
-
-/*!
- * Insert call to the CountBbl() analysis routine before every basic block
- * of the trace.
- * This function is called every time a new trace is encountered.
- * @param[in]   trace    trace to be instrumented
- * @param[in]   v        value specified by the tool in the TRACE_AddInstrumentFunction
- *                       function call
- */
-VOID Trace(TRACE trace, VOID *v)
-{
-    if( g_bMainExecLoaded ) {
-        // Visit every basic block in the trace
-        for (BBL bbl = TRACE_BblHead(trace); BBL_Valid(bbl); bbl = BBL_Next(bbl))
-        {
-            // Insert a call to CountBbl() before every basic bloc, passing the number of instructions
-            BBL_InsertCall(bbl, IPOINT_BEFORE, (AFUNPTR)CountBbl, IARG_UINT32, BBL_NumIns(bbl), IARG_END);
-        }
-    }
-}
-
 /*!
  * Increase counter of threads in the application.
  * This function is called for every thread created by the application when it is
@@ -110,7 +70,7 @@ int order = 0;
 
 VOID addMemLog(char rw, ADDRINT addr, UINT32 size, UINT32 logIndex) {
     std::ostringstream detailStream;
-    detailStream << "        [" << order++ << "] " << " -" << rw << "-> " << addr << " <" << size << ">" << endl;
+    detailStream << "        [" << order++ << "] " << " -" << rw << "-> " << std::hex << addr << " <" << size << ">" << endl;
     insLogs[logIndex] += detailStream.str();
 }
 
@@ -137,12 +97,12 @@ VOID Instruction(INS ins, VOID *v)
     if( g_bMainExecLoaded ) { // if the main module is not loaded, we don’t need to trace any.
         if( g_addrLow <= addr && addr <= g_addrHigh ) {
             std::ostringstream detailStream;
-            detailStream << addr << " " << strInst;
+            detailStream << std::hex << addr << " " << strInst;
 
 
             UINT32 memOperands = INS_MemoryOperandCount(ins);
-            UINT32 memRRegs = INS_MaxNumWRegs(ins);
-            UINT32 memWRegs = INS_MaxNumRRegs(ins);
+            UINT32 memRRegs = INS_MaxNumRRegs(ins);
+            UINT32 memWRegs = INS_MaxNumWRegs(ins);
 
             if (memRRegs > 0) {
                 detailStream << " -r->";
@@ -157,7 +117,7 @@ VOID Instruction(INS ins, VOID *v)
             if (memWRegs > 0) {
                 detailStream << " -w->";
                 for( UINT32 i=0; i < memWRegs; i++ ) {
-                    REG reg = INS_RegR(ins, i);
+                    REG reg = INS_RegW(ins, i);
                     detailStream << " " << REG_StringShort(reg);
                     if ( REG_is_fr( reg ) ) {
                         detailStream << " (float)";
@@ -222,14 +182,6 @@ VOID ImageLoad(IMG img, VOID *v)
  */
 VOID Fini(INT32 code, VOID *v)
 {
-    *out <<  "===============================================" << endl;
-    *out <<  "MyPinTool analysis results: " << endl;
-    *out <<  "Number of instructions: " << insCount  << endl;
-    *out <<  "Number of basic blocks: " << bblCount  << endl;
-    *out <<  "Number of threads: " << threadCount  << endl;
-    *out <<  "===============================================" << endl;
-
-
     for(size_t i = 0; i < insLogs.size(); i++)
     {
         *out << insLogs[i];
@@ -266,12 +218,6 @@ int main(int argc, char *argv[])
 
         // Register Instruction to be called to instrument instructions
         INS_AddInstrumentFunction(Instruction, 0);
-
-        // Register function to be called to instrument traces
-        TRACE_AddInstrumentFunction(Trace, 0);
-
-        // Register function to be called for every thread before it starts running
-        PIN_AddThreadStartFunction(ThreadStart, 0);
 
         // Register function to be called when the application exits
         PIN_AddFiniFunction(Fini, 0);
