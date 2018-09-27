@@ -105,18 +105,75 @@ VOID ThreadStart(THREADID threadIndex, CONTEXT *ctxt, INT32 flags, VOID *v)
     threadCount++;
 }
 
+std::vector<std::string> insLogs;
+int order = 0;
+
+VOID addMemLog(char rw, ADDRINT addr, UINT32 size, UINT32 logIndex) {
+    std::ostringstream detailStream;
+    detailStream << "        [" << order++ << "] " << " -" << rw << "-> " << addr << " <" << size << ">" << endl;
+    insLogs[logIndex] += detailStream.str();
+}
+
+VOID RecordMemRead(ADDRINT ip, ADDRINT addr, UINT32 size, UINT32 logIndex)
+{
+    addMemLog('r', addr, size, logIndex);
+}
+
+VOID RecordMemWrite(ADDRINT ip, ADDRINT addr, UINT32 size, UINT32 logIndex)
+{
+    addMemLog('w', addr, size, logIndex);
+}
+
+
 VOID Instruction(INS ins, VOID *v)
 {
     //https://software.intel.com/sites/landingpage/pintool/docs/97619/Pin/html/group__INS__BASIC__API__GEN__IA32.html
-    // compare [1] and [2]. [1] is a lot less.
     string strInst = INS_Mnemonic(ins);
     ADDRINT addr = INS_Address(ins);
+
+    // BOOL isCall = INS_IsCall(ins);
+    // BOOL isRet = INS_IsRet(ins);
+
     if( g_bMainExecLoaded ) { // if the main module is not loaded, we don’t need to trace any.
         if( g_addrLow <= addr && addr <= g_addrHigh ) {
-            printf("[1] %llx %s\n", addr, strInst.c_str());
+            std::ostringstream detailStream;
+            detailStream << addr << " " << strInst << endl;
+            insLogs.push_back(detailStream.str());
+
+            UINT32 memOperands = INS_MemoryOperandCount(ins);
+            // UINT32 memRRegs = INS_MaxNumWRegs(ins);
+            // UINT32 memWRegs = INS_MaxNumRRegs(ins);
+
+            // Iterate over each memory operand of the instruction.
+            for (UINT32 memOp = 0; memOp < memOperands; memOp++) {
+                if (INS_MemoryOperandIsRead(ins, memOp)) {
+                    INS_InsertCall(
+                        ins, IPOINT_BEFORE,
+                        (AFUNPTR)RecordMemRead,
+                        IARG_INST_PTR,
+                        IARG_MEMORYOP_EA, memOp,
+                        IARG_MEMORYREAD_SIZE,
+                        IARG_UINT32, insLogs.size() - 1,
+                        IARG_END
+                    );
+                } else if (INS_MemoryOperandIsWritten(ins, memOp)) {
+                    INS_InsertCall(
+                        ins, IPOINT_BEFORE,
+                        (AFUNPTR)RecordMemWrite,
+                        IARG_INST_PTR,
+                        IARG_MEMORYOP_EA, memOp,
+                        IARG_MEMORYWRITE_SIZE,
+                        IARG_UINT32, insLogs.size() - 1,
+                        IARG_END
+                    );
+                }
+
+            }
+        } else {
+            // printf("[2] %llx %s\n", addr, strInst.c_str());
         }
     } else {
-        printf("[2] %llx %s\n", addr, strInst.c_str());
+        printf("[3] %llx %s\n", addr, strInst.c_str());
     }
 }
 
@@ -147,6 +204,12 @@ VOID Fini(INT32 code, VOID *v)
     *out <<  "Number of basic blocks: " << bblCount  << endl;
     *out <<  "Number of threads: " << threadCount  << endl;
     *out <<  "===============================================" << endl;
+
+
+    for(size_t i = 0; i < insLogs.size(); i++)
+    {
+        *out << insLogs[i];
+    }
 }
 
 /*!
