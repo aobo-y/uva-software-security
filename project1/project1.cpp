@@ -137,12 +137,36 @@ VOID Instruction(INS ins, VOID *v)
     if( g_bMainExecLoaded ) { // if the main module is not loaded, we don’t need to trace any.
         if( g_addrLow <= addr && addr <= g_addrHigh ) {
             std::ostringstream detailStream;
-            detailStream << addr << " " << strInst << endl;
-            insLogs.push_back(detailStream.str());
+            detailStream << addr << " " << strInst;
+
 
             UINT32 memOperands = INS_MemoryOperandCount(ins);
-            // UINT32 memRRegs = INS_MaxNumWRegs(ins);
-            // UINT32 memWRegs = INS_MaxNumRRegs(ins);
+            UINT32 memRRegs = INS_MaxNumWRegs(ins);
+            UINT32 memWRegs = INS_MaxNumRRegs(ins);
+
+            if (memRRegs > 0) {
+                detailStream << " -r->";
+                for( UINT32 i=0; i < memRRegs; i++ ) {
+                    REG reg = INS_RegR(ins, i);
+                    detailStream << " " << REG_StringShort(reg);
+                    if ( REG_is_fr( reg ) ) {
+                        detailStream << " (float)";
+                    }
+                }
+            }
+            if (memWRegs > 0) {
+                detailStream << " -w->";
+                for( UINT32 i=0; i < memWRegs; i++ ) {
+                    REG reg = INS_RegR(ins, i);
+                    detailStream << " " << REG_StringShort(reg);
+                    if ( REG_is_fr( reg ) ) {
+                        detailStream << " (float)";
+                    }
+                }
+            }
+
+            detailStream << endl;
+            insLogs.push_back(detailStream.str());
 
             // Iterate over each memory operand of the instruction.
             for (UINT32 memOp = 0; memOp < memOperands; memOp++) {
