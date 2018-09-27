@@ -65,23 +65,27 @@ VOID ThreadStart(THREADID threadIndex, CONTEXT *ctxt, INT32 flags, VOID *v)
     threadCount++;
 }
 
-std::vector<std::string> insLogs;
+std::map<ADDRINT, std::string> insLogs;
 int order = 0;
 
-VOID addMemLog(char rw, ADDRINT addr, UINT32 size, UINT32 logIndex) {
+std::string getMemLog(char rw, ADDRINT addr, UINT32 size) {
     std::ostringstream detailStream;
     detailStream << "        [" << order++ << "] " << " -" << rw << "-> " << std::hex << addr << " <" << size << ">" << endl;
-    insLogs[logIndex] += detailStream.str();
+    return detailStream.str();
 }
 
-VOID RecordMemRead(ADDRINT ip, ADDRINT addr, UINT32 size, UINT32 logIndex)
-{
-    addMemLog('r', addr, size, logIndex);
+VOID RecordMemRead(ADDRINT ip, ADDRINT addr, UINT32 size) {
+    insLogs[ip] += getMemLog('r', addr, size);
 }
 
-VOID RecordMemWrite(ADDRINT ip, ADDRINT addr, UINT32 size, UINT32 logIndex)
-{
-    addMemLog('w', addr, size, logIndex);
+VOID RecordMemWrite(ADDRINT ip, ADDRINT addr, UINT32 size) {
+    insLogs[ip] += getMemLog('w', addr, size);
+}
+
+VOID RecordNoMemAccess(ADDRINT ip) {
+    std::ostringstream detailStream;
+    detailStream << "        [" << order++ << "] " << " no mem access" << endl;
+    insLogs[ip] += detailStream.str();
 }
 
 
@@ -126,33 +130,47 @@ VOID Instruction(INS ins, VOID *v)
             }
 
             detailStream << endl;
-            insLogs.push_back(detailStream.str());
 
-            // Iterate over each memory operand of the instruction.
-            for (UINT32 memOp = 0; memOp < memOperands; memOp++) {
-                if (INS_MemoryOperandIsRead(ins, memOp)) {
-                    INS_InsertCall(
-                        ins, IPOINT_BEFORE,
-                        (AFUNPTR)RecordMemRead,
-                        IARG_INST_PTR,
-                        IARG_MEMORYOP_EA, memOp,
-                        IARG_MEMORYREAD_SIZE,
-                        IARG_UINT32, insLogs.size() - 1,
-                        IARG_END
-                    );
-                } else if (INS_MemoryOperandIsWritten(ins, memOp)) {
-                    INS_InsertCall(
-                        ins, IPOINT_BEFORE,
-                        (AFUNPTR)RecordMemWrite,
-                        IARG_INST_PTR,
-                        IARG_MEMORYOP_EA, memOp,
-                        IARG_MEMORYWRITE_SIZE,
-                        IARG_UINT32, insLogs.size() - 1,
-                        IARG_END
-                    );
-                }
-
+            // some instruction will be instrued multiple times, no idea why
+            // so check here and only log once
+            if (insLogs.count(addr) == 0) {
+                insLogs[addr] = detailStream.str();
             }
+
+
+            if (memOperands > 0) {
+                // Iterate over each memory operand of the instruction.
+                for (UINT32 memOp = 0; memOp < memOperands; memOp++) {
+                    if (INS_MemoryOperandIsRead(ins, memOp)) {
+                        INS_InsertCall(
+                            ins, IPOINT_BEFORE,
+                            (AFUNPTR)RecordMemRead,
+                            IARG_INST_PTR,
+                            IARG_MEMORYOP_EA, memOp,
+                            IARG_MEMORYREAD_SIZE,
+                            IARG_END
+                        );
+                    } else if (INS_MemoryOperandIsWritten(ins, memOp)) {
+                        INS_InsertCall(
+                            ins, IPOINT_BEFORE,
+                            (AFUNPTR)RecordMemWrite,
+                            IARG_INST_PTR,
+                            IARG_MEMORYOP_EA, memOp,
+                            IARG_MEMORYWRITE_SIZE,
+                            IARG_END
+                        );
+                    }
+                }
+            } else {
+                INS_InsertCall(
+                    ins, IPOINT_BEFORE,
+                    (AFUNPTR)RecordNoMemAccess,
+                    IARG_INST_PTR,
+                    IARG_END
+                );
+            }
+
+
         } else {
             // printf("[2] %llx %s\n", addr, strInst.c_str());
         }
@@ -182,9 +200,16 @@ VOID ImageLoad(IMG img, VOID *v)
  */
 VOID Fini(INT32 code, VOID *v)
 {
-    for(size_t i = 0; i < insLogs.size(); i++)
+    vector<ADDRINT> insVector;
+    for(map<ADDRINT, std::string>::iterator it = insLogs.begin(); it != insLogs.end(); ++it) {
+        insVector.push_back(it->first);
+    }
+    std::sort(insVector.begin(), insVector.end());
+
+    printf("****** %lu", insVector.size());
+    for(size_t i = 0; i < insVector.size(); i++)
     {
-        *out << insLogs[i];
+        *out << insLogs[insVector[i]];
     }
 }
 
