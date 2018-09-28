@@ -167,10 +167,12 @@ VOID Instruction(INS ins, VOID *v) {
                 );
             }
         } else {
+            // Do not log anything happens outside of Main
             // printf("[2] %llx %s\n", addr, strInst.c_str());
         }
     } else {
-        printf("[3] %llx %s\n", addr, strInst.c_str());
+        // Do not log anything happens before Main is loaded
+        // printf("[3] %llx %s\n", addr, strInst.c_str());
     }
 }
 
