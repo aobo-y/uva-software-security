@@ -2,3 +2,4 @@ bin/**
 obj-intel64
 target/**
 !target/target.c
+!target/target.s
