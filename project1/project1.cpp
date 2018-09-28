@@ -40,8 +40,7 @@ KNOB<BOOL>   KnobCount(KNOB_MODE_WRITEONCE,  "pintool",
 /*!
  *  Print out help message.
  */
-INT32 Usage()
-{
+INT32 Usage() {
     cerr << "This tool prints out the number of dynamically executed " << endl <<
             "instructions, basic blocks and threads in the application." << endl << endl;
 
@@ -50,38 +49,37 @@ INT32 Usage()
     return -1;
 }
 
-/*!
- * Increase counter of threads in the application.
- * This function is called for every thread created by the application when it is
- * about to start running (including the root thread).
- * @param[in]   threadIndex     ID assigned by PIN to the new thread
- * @param[in]   ctxt            initial register state for the new thread
- * @param[in]   flags           thread creation flags (OS specific)
- * @param[in]   v               value specified by the tool in the
- *                              PIN_AddThreadStartFunction function call
- */
-VOID ThreadStart(THREADID threadIndex, CONTEXT *ctxt, INT32 flags, VOID *v)
-{
-    threadCount++;
-}
-
+// map to hold the running logs for each instruction
 std::map<ADDRINT, std::string> insLogs;
+
+// order to track the how the instructions are processed
 int order = 0;
 
+// a util map to recover mem easier, record all mem access
+std::map<ADDRINT, UINT32> memSet;
+
+// return the string format of the log of a memory access
 std::string getMemLog(char rw, ADDRINT addr, UINT32 size) {
     std::ostringstream detailStream;
     detailStream << "        [" << order++ << "] " << " -" << rw << "-> " << std::hex << addr << " <" << size << ">" << endl;
     return detailStream.str();
 }
 
+// inserted for instructions which read memory
 VOID RecordMemRead(ADDRINT ip, ADDRINT addr, UINT32 size) {
     insLogs[ip] += getMemLog('r', addr, size);
+
+    memSet[addr] = size;
 }
 
+// inserted for instructions which write memory
 VOID RecordMemWrite(ADDRINT ip, ADDRINT addr, UINT32 size) {
     insLogs[ip] += getMemLog('w', addr, size);
+
+    memSet[addr] = size;
 }
 
+// inserted for instruction which do not access memory
 VOID RecordNoMemAccess(ADDRINT ip) {
     std::ostringstream detailStream;
     detailStream << "        [" << order++ << "] " << " no mem access" << endl;
@@ -89,8 +87,7 @@ VOID RecordNoMemAccess(ADDRINT ip) {
 }
 
 
-VOID Instruction(INS ins, VOID *v)
-{
+VOID Instruction(INS ins, VOID *v) {
     //https://software.intel.com/sites/landingpage/pintool/docs/97619/Pin/html/group__INS__BASIC__API__GEN__IA32.html
     string strInst = INS_Mnemonic(ins);
     ADDRINT addr = INS_Address(ins);
@@ -169,8 +166,6 @@ VOID Instruction(INS ins, VOID *v)
                     IARG_END
                 );
             }
-
-
         } else {
             // printf("[2] %llx %s\n", addr, strInst.c_str());
         }
@@ -179,8 +174,7 @@ VOID Instruction(INS ins, VOID *v)
     }
 }
 
-VOID ImageLoad(IMG img, VOID *v)
-{
+VOID ImageLoad(IMG img, VOID *v) {
     if( IMG_IsMainExecutable(img) ) {
         //printf("%p - %p\n", (void*)IMG_LowAddress(img), (void*)IMG_HighAddress(img));
         g_addrLow = IMG_LowAddress(img);
@@ -198,18 +192,28 @@ VOID ImageLoad(IMG img, VOID *v)
  * @param[in]   v               value specified by the tool in the
  *                              PIN_AddFiniFunction function call
  */
-VOID Fini(INT32 code, VOID *v)
-{
+VOID Fini(INT32 code, VOID *v) {
     vector<ADDRINT> insVector;
     for(map<ADDRINT, std::string>::iterator it = insLogs.begin(); it != insLogs.end(); ++it) {
         insVector.push_back(it->first);
     }
     std::sort(insVector.begin(), insVector.end());
 
-    printf("****** %lu", insVector.size());
-    for(size_t i = 0; i < insVector.size(); i++)
-    {
+    for(size_t i = 0; i < insVector.size(); i++) {
         *out << insLogs[insVector[i]];
+    }
+
+    *out <<  "===============================================" << endl;
+    *out <<  "All memeory address accessed by the instructions" << endl;
+    *out <<  "===============================================" << endl;
+
+    vector<ADDRINT> memVector;
+    for(map<ADDRINT, UINT32>::iterator it = memSet.begin(); it != memSet.end(); ++it) {
+        memVector.push_back(it->first);
+    }
+    std::sort(memVector.begin(), memVector.end());
+    for(size_t i = 0; i < memVector.size(); i++) {
+        *out << std::hex << memVector[i] << " " << memSet[memVector[i]] << endl;
     }
 }
 
@@ -220,12 +224,10 @@ VOID Fini(INT32 code, VOID *v)
  * @param[in]   argv            array of command line arguments,
  *                              including pin -t <toolname> -- ...
  */
-int main(int argc, char *argv[])
-{
+int main(int argc, char *argv[]) {
     // Initialize PIN library. Print help message if -h(elp) is specified
     // in the command line or the command line is invalid
-    if( PIN_Init(argc,argv) )
-    {
+    if( PIN_Init(argc,argv) ) {
         return Usage();
     }
 
@@ -233,8 +235,7 @@ int main(int argc, char *argv[])
 
     if (!fileName.empty()) { out = new std::ofstream(fileName.c_str());}
 
-    if (KnobCount)
-    {
+    if (KnobCount) {
         // On OS X*, you must initially do PIN_InitSymbols() if you want to use IMG_AddInstrumentFunction()
         PIN_InitSymbols();
 
@@ -250,8 +251,8 @@ int main(int argc, char *argv[])
 
     cerr <<  "===============================================" << endl;
     cerr <<  "This application is instrumented by MyPinTool" << endl;
-    if (!KnobOutputFile.Value().empty())
-    {
+
+    if (!KnobOutputFile.Value().empty()) {
         cerr << "See file " << KnobOutputFile.Value() << " for analysis results" << endl;
     }
     cerr <<  "===============================================" << endl;
