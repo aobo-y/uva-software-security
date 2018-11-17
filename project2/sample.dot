@@ -1,0 +1,22 @@
+digraph control_flow_graph {
+ "entry" -> "if.then";
+ "entry" -> "if.end";
+ "if.then" -> "if.end";
+ "if.end" -> "if.then3";
+ "if.end" -> "if.else";
+ "if.then3" -> "if.end6";
+ "if.else" -> "if.end6";
+ "if.end6" -> "for.cond";
+ "for.cond" -> "for.body";
+ "for.cond" -> "for.end";
+ "for.body" -> "sw.default";
+ "for.body" -> "sw.bb";
+ "for.body" -> "sw.bb10";
+ "for.body" -> "sw.bb12";
+ "sw.bb" -> "sw.epilog";
+ "sw.bb10" -> "sw.epilog";
+ "sw.bb12" -> "sw.epilog";
+ "sw.default" -> "sw.epilog";
+ "sw.epilog" -> "for.inc";
+ "for.inc" -> "for.cond";
+}
