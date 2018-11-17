@@ -1,0 +1,10 @@
+digraph call_graph {
+ main -> A;
+ main -> C;
+ main -> E;
+ main -> F;
+ B -> C;
+ C -> D;
+ C -> E;
+ F -> printf;
+}
