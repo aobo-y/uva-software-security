@@ -45,6 +45,7 @@ namespace {
     }
 
     virtual bool runOnModule(Module &M) override {
+      // only track control-flow-graph for main function
       Function* mainF;
 
       callGraph << "digraph call_graph {\n";
@@ -63,8 +64,7 @@ namespace {
 
       controlFlowGraph << "digraph control_flow_graph {\n";
 
-      // track appeared blocks to detect if any loops let later blocks point back
-
+      // control flow graph for main function
       for(Function::iterator bbIter = mainF->begin(); bbIter != mainF->end(); bbIter++) {
         BasicBlock* bb = dyn_cast<BasicBlock>(&*bbIter);
 
@@ -80,6 +80,7 @@ namespace {
 
       controlFlowGraph << "}\n";
 
+      // print possible execution paths of main
       errs() << "passible paths:\n";
       set<BasicBlock*> path;
       findAllPaths(mainF->begin(), path);
